@@ -13,3 +13,7 @@ dist/
 .env.production
 *.zip
 *.tar.gz
+infra/.terraform/
+node_modules/
+dist/
+*.tfstate
