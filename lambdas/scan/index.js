@@ -18,13 +18,13 @@
 'use strict';
 
 const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
-const { fetchMultipleStocks, fetchIndexData } = require('../shared/yahoo');
-const { cacheGet, cacheSet } = require('../shared/cache');
+const { fetchMultipleStocks, fetchIndexData } = require('./shared/yahoo');
+const { cacheGet, cacheSet } = require('./shared/cache');
 const {
   calcSMA, calcEMA, calcRSI, calcMACD, calcStochastic,
   calcATR, calcCMF, volumeSignal, findSupportResistance,
   estimateTargetDays, calcBrahmaScore, scoreToSignal,
-} = require('../shared/indicators');
+} = require('./shared/indicators');
 
 const s3 = new S3Client({ region: process.env.AWS_REGION || 'ap-south-1' });
 const BUCKET = process.env.UNIVERSE_BUCKET || 'brahma-universe';

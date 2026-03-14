@@ -14,14 +14,14 @@
 
 'use strict';
 
-const { fetchStockData }   = require('../shared/yahoo');
-const { cacheGet, cacheSet, getHotStocks } = require('../shared/cache');
+const { fetchStockData }   = require('./shared/yahoo');
+const { cacheGet, cacheSet, getHotStocks } = require('./shared/cache');
 const {
   calcSMA, calcEMA, calcRSI, calcMACD, calcStochastic,
   calcATR, calcBollingerBands, calcOBV, calcCMF,
   volumeSignal, findSupportResistance,
   estimateTargetDays, calcBrahmaScore, scoreToSignal,
-} = require('../shared/indicators');
+} = require('./shared/indicators');
 
 function computeIndicators(stockData) {
   const { bars, meta, symbol } = stockData;

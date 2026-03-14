@@ -20,7 +20,7 @@ const s3 = new S3Client({ region: process.env.AWS_REGION || 'ap-south-1' });
 const BUCKET = process.env.UNIVERSE_BUCKET || 'brahma-universe';
 
 // Official Nifty 500 CSV URL
-const NIFTY500_URL = 'https://www.niftyindices.com/IndexConstituents/ind_nifty500list.csv';
+const NIFTY500_URL = 'https://archives.nseindia.com/content/indices/ind_nifty500list.csv';
 
 /**
  * Parse the Nifty 500 CSV.
@@ -105,7 +105,6 @@ module.exports.handler = async (event) => {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'text/csv,text/plain,*/*',
-        'Referer': 'https://www.niftyindices.com/',
       },
       signal: AbortSignal.timeout(30000),
     });
@@ -127,7 +126,7 @@ module.exports.handler = async (event) => {
       fetchedAt:   new Date().toISOString(),
       date:        today,
       totalStocks: stocks.length,
-      source:      'https://www.niftyindices.com/IndexConstituents/ind_nifty500list.csv',
+      source:      'https://archives.nseindia.com/content/indices/ind_nifty500list.csv',
       stocks,      // flat array: [{ symbol, name, industry }]
       bySector,    // grouped by our sector names
     };

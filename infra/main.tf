@@ -47,13 +47,9 @@ provider "aws" {
 ##############################################################################
 
 variable "aws_region"        { default = "ap-south-1" }
-variable "domain_name"       { default = "brahma.in" }
-variable "api_domain"        { default = "api.brahma.in" }
+variable "domain_name"       { default = "" }
+variable "api_domain"        { default = "" }
 variable "environment"       { default = "production" }
-variable "anthropic_api_key" {
-  sensitive   = true
-  description = "Anthropic API key — passed via TF_VAR_anthropic_api_key env var. Never hardcode."
-}
 
 ##############################################################################
 # VPC — Lambda and Redis run in private subnet
@@ -192,14 +188,6 @@ resource "aws_s3_bucket_public_access_block" "universe" {
 # CLOUDFRONT
 ##############################################################################
 
-resource "aws_acm_certificate" "cdn" {
-  provider                  = aws.us_east_1
-  domain_name               = var.domain_name
-  subject_alternative_names = ["www.${var.domain_name}"]
-  validation_method         = "DNS"
-  lifecycle { create_before_destroy = true }
-}
-
 resource "aws_cloudfront_origin_access_control" "frontend" {
   name                              = "brahma-frontend-oac"
   origin_access_control_origin_type = "s3"
@@ -207,12 +195,26 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
+# ACM Certificate for signl.co.in (must be us-east-1 for CloudFront)
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+
+resource "aws_acm_certificate" "signl" {
+  provider          = aws.us_east_1
+  domain_name       = "signl.co.in"
+  subject_alternative_names = ["www.signl.co.in"]
+  validation_method = "DNS"
+  lifecycle { create_before_destroy = true }
+}
+
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
   is_ipv6_enabled     = true
   default_root_object = "index.html"
-  aliases             = [var.domain_name, "www.${var.domain_name}"]
   price_class         = "PriceClass_200" # NA + EU + Asia
+  aliases             = ["signl.co.in", "www.signl.co.in"]
 
   origin {
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
@@ -241,7 +243,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = aws_acm_certificate.cdn.arn
+    acm_certificate_arn      = aws_acm_certificate.signl.arn
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.2_2021"
   }
@@ -279,7 +281,7 @@ resource "aws_secretsmanager_secret" "brahma" {
 resource "aws_secretsmanager_secret_version" "brahma" {
   secret_id     = aws_secretsmanager_secret.brahma.id
   secret_string = jsonencode({
-    ANTHROPIC_API_KEY = var.anthropic_api_key
+    ANTHROPIC_API_KEY = "REPLACE_VIA_DEPLOY_SCRIPT"
   })
 }
 
@@ -374,7 +376,6 @@ resource "aws_elasticache_cluster" "redis" {
   port                 = 6379
   subnet_group_name    = aws_elasticache_subnet_group.brahma.name
   security_group_ids   = [aws_security_group.redis.id]
-  at_rest_encryption_enabled = false  # t4g.micro doesn't support encryption
   tags                 = { Name = "brahma-redis" }
 }
 
@@ -402,7 +403,7 @@ locals {
     REDIS_URL            = "redis://${aws_elasticache_cluster.redis.cache_nodes[0].address}:6379"
     BRAHMA_SECRET_ARN    = aws_secretsmanager_secret.brahma.arn
     UNIVERSE_BUCKET      = aws_s3_bucket.universe.bucket
-    FRONTEND_ORIGIN      = "https://${var.domain_name}"
+    FRONTEND_ORIGIN      = "*"
     SCAN_FUNCTION_NAME   = "brahma-scan"
     AWS_REGION_OVERRIDE  = var.aws_region
   }
@@ -577,10 +578,11 @@ resource "aws_apigatewayv2_api" "brahma" {
   name          = "brahma-api"
   protocol_type = "HTTP"
   cors_configuration {
-    allow_origins  = ["https://${var.domain_name}", "https://www.${var.domain_name}"]
+    allow_origins  = ["*"]
     allow_methods  = ["GET", "POST", "OPTIONS"]
-    allow_headers  = ["content-type", "authorization"]
+    allow_headers  = ["content-type", "authorization", "x-api-key", "x-amz-date", "x-amz-security-token"]
     max_age        = 300
+    expose_headers = ["content-type"]
   }
 }
 
@@ -674,6 +676,7 @@ resource "aws_apigatewayv2_route" "ask" {
   route_key = "POST /ask"
   target    = "integrations/${aws_apigatewayv2_integration.ask.id}"
 }
+
 
 resource "aws_apigatewayv2_route" "sector" {
   api_id    = aws_apigatewayv2_api.brahma.id

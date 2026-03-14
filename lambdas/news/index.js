@@ -10,8 +10,8 @@
 
 'use strict';
 
-const { getSecrets }           = require('../shared/secrets');
-const { cacheGet, cacheSet }   = require('../shared/cache');
+const { getSecrets }           = require('./shared/secrets');
+const { cacheGet, cacheSet }   = require('./shared/cache');
 
 const RSS_FEEDS = [
   {

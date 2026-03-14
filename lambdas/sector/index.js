@@ -10,9 +10,9 @@
 
 'use strict';
 
-const { fetchIndexData }       = require('../shared/yahoo');
-const { cacheGet, cacheSet }   = require('../shared/cache');
-const { calcSMA, calcRSI, calcATR } = require('../shared/indicators');
+const { fetchIndexData }       = require('./shared/yahoo');
+const { cacheGet, cacheSet }   = require('./shared/cache');
+const { calcSMA, calcRSI, calcATR } = require('./shared/indicators');
 
 const SECTOR_INDICES = {
   Banking:  { ticker: '^NSEBANK',  description: 'Nifty Bank Index' },

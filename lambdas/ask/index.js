@@ -1,86 +1,83 @@
-/**
- * BRAHMA INTELLIGENCE — Ask Lambda
- * POST /ask { question: "..." }
- *
- * Streams Claude response token-by-token.
- * Fetches current Nifty regime as context before calling Claude.
- * Uses Lambda response streaming (requires InvokeWithResponseStream).
- */
-
 'use strict';
 
-const { getSecrets }       = require('../shared/secrets');
-const { cacheGet }         = require('../shared/cache');
+const { getSecrets } = require('./shared/secrets');
+const { cacheGet }   = require('./shared/cache');
 
-const SYSTEM_PROMPT = `You are BRAHMA — India's most trusted AI market advisor for NSE/BSE equity markets.
+const CORS_HEADERS = {
+  'Content-Type': 'application/json',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+const DEFAULT_SYSTEM_PROMPT = `You are BRAHMA — India's most trusted AI market advisor for NSE/BSE equity markets.
 
 You are talking to an Indian retail investor or trader.
 
 YOUR RULES:
 1. Always ground your answers in technical analysis principles and real market data when available.
 2. You will be given the current Nifty market regime and sector data if available — use it.
-3. Never claim to have real-time price data you don't have. Say "based on the regime data provided" not "the current price is X".
-4. Do NOT give specific buy/sell calls for individual stocks in response to a question unless the user has asked for a signal on a specific stock (tell them to use the Signals tab).
+3. Never claim to have real-time price data you don't have. Say "based on the regime data provided".
+4. Do NOT give specific buy/sell calls unless asked (tell them to use the Signals tab).
 5. Always add a disclaimer for specific investment advice.
 6. Keep answers concise — 3-5 paragraphs maximum.
 7. Use INR amounts, NSE symbols, and Indian market context.
-8. FII/DII data is not available. Do not claim to know FII flows unless you're asked a general question about FII impact.
+8. FII/DII data is not available.
 
-You are allowed to discuss: technical analysis, market regimes, sector rotation, trading strategies, risk management, how to read indicators, NSE/BSE mechanics, and general Indian market education.`;
+You are allowed to discuss: technical analysis, market regimes, sector rotation, trading strategies,
+risk management, how to read indicators, NSE/BSE mechanics, and general Indian market education.`;
 
-module.exports.handler = awslambda.streamifyResponse(async (event, responseStream) => {
-  const metadata = {
-    statusCode: 200,
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Access-Control-Allow-Origin': process.env.FRONTEND_ORIGIN || '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'Cache-Control': 'no-cache',
-      'X-Accel-Buffering': 'no',
-    },
-  };
-
-  // For OPTIONS preflight
+module.exports.handler = async (event) => {
   if (event.requestContext?.http?.method === 'OPTIONS') {
-    responseStream.write('');
-    responseStream.end();
-    return;
+    return { statusCode: 200, headers: CORS_HEADERS, body: '' };
   }
 
-  const httpResponseMetadata = require('@aws-sdk/client-lambda').pipeline;
-
   try {
-    const body = JSON.parse(event.body || '{}');
-    const question = (body.question || '').trim();
+    const body       = JSON.parse(event.body || '{}');
+    const question   = (body.question || '').trim();
+    const systemPrompt = (body.systemPrompt || '').trim() || DEFAULT_SYSTEM_PROMPT;
+    // Allow caller to specify max_tokens — TOP5 needs 4000, others need less
+    const maxTokens  = Math.min(parseInt(body.maxTokens) || 4000, 8000);
+
     if (!question) {
-      responseStream.write(JSON.stringify({ error: 'question is required' }));
-      responseStream.end();
-      return;
+      return {
+        statusCode: 400,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({ error: 'question is required' }),
+      };
     }
 
-    // Fetch current market context from cache
+    // Add market context only for default chat prompt
     let marketContext = '';
-    const regime = await cacheGet('nifty:regime');
-    if (regime?.regime) {
-      marketContext = `\nCURRENT MARKET CONTEXT (real data from Nifty):
+    const isDefaultPrompt = !body.systemPrompt;
+    if (isDefaultPrompt) {
+      try {
+        const regime = await cacheGet('nifty:regime');
+        if (regime?.regime) {
+          marketContext = `\nCURRENT MARKET CONTEXT (real Nifty data):
 - Nifty 50: ${regime.nifty?.price} (${regime.nifty?.changePct > 0 ? '+' : ''}${regime.nifty?.changePct}%)
 - Market Regime: ${regime.regime?.regime}
-- SMA50: ${regime.nifty?.sma50 || 'N/A'}
-- SMA200: ${regime.nifty?.sma200 || 'N/A (requires 200 days)'}
 - RSI: ${regime.nifty?.rsi || 'N/A'}
 - Regime advice: ${regime.regime?.advice}`;
-    }
-
-    const sectors = await cacheGet('sector:rankings');
-    if (sectors?.sectors?.length) {
-      const top3 = sectors.sectors.slice(0, 3).map(s => `${s.sector}(${s.score})`).join(', ');
-      marketContext += `\n- Top sectors today: ${top3}`;
+        }
+        const sectors = await cacheGet('sector:rankings');
+        if (sectors?.sectors?.length) {
+          const top3 = sectors.sectors.slice(0, 3).map(s => `${s.sector}(${s.score})`).join(', ');
+          marketContext += `\n- Top sectors today: ${top3}`;
+        }
+      } catch (_) {}
     }
 
     const { anthropicKey } = await getSecrets();
 
-    const claudeResponse = await fetch('https://api.anthropic.com/v1/messages', {
+    const userContent = isDefaultPrompt
+      ? `${marketContext}\n\nUSER QUESTION: ${question}`
+      : question;
+
+    // Use Sonnet for all calls - reliable JSON output, no backtick wrapping
+    const model = 'claude-sonnet-4-20250514';
+
+    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -88,55 +85,39 @@ module.exports.handler = awslambda.streamifyResponse(async (event, responseStrea
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
-        stream: true,
-        system: SYSTEM_PROMPT,
-        messages: [{
-          role: 'user',
-          content: `${marketContext}\n\nUSER QUESTION: ${question}`,
-        }],
+        model,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userContent }],
       }),
-      signal: AbortSignal.timeout(55000),
+      signal: AbortSignal.timeout(28000),
     });
 
-    if (!claudeResponse.ok) {
-      const err = await claudeResponse.text();
-      responseStream.write(JSON.stringify({ error: `Claude API: ${claudeResponse.status} ${err}` }));
-      responseStream.end();
-      return;
+    if (!claudeRes.ok) {
+      const err = await claudeRes.text();
+      console.error('[ASK] Claude API error:', claudeRes.status, err);
+      return {
+        statusCode: 502,
+        headers: CORS_HEADERS,
+        body: JSON.stringify({ error: `Claude API error: ${claudeRes.status}` }),
+      };
     }
 
-    // Stream response text
-    const reader = claudeResponse.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+    const data   = await claudeRes.json();
+    const answer = data.content?.[0]?.text || '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const data = line.slice(6).trim();
-        if (data === '[DONE]') continue;
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-            responseStream.write(parsed.delta.text);
-          }
-        } catch (_) { /* skip malformed events */ }
-      }
-    }
-
-    responseStream.end();
+    return {
+      statusCode: 200,
+      headers: CORS_HEADERS,
+      body: JSON.stringify({ success: true, answer }),
+    };
 
   } catch (err) {
     console.error('[ASK] Error:', err.message);
-    responseStream.write(JSON.stringify({ error: err.message }));
-    responseStream.end();
+    return {
+      statusCode: 500,
+      headers: CORS_HEADERS,
+      body: JSON.stringify({ error: err.message }),
+    };
   }
-});
+};

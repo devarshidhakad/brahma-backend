@@ -18,15 +18,15 @@
 
 'use strict';
 
-const { getSecrets }           = require('../shared/secrets');
-const { fetchStockData }       = require('../shared/yahoo');
-const { cacheGet, cacheSet, addHotStock } = require('../shared/cache');
+const { getSecrets }           = require('./shared/secrets');
+const { fetchStockData }       = require('./shared/yahoo');
+const { cacheGet, cacheSet, addHotStock } = require('./shared/cache');
 const {
   calcSMA, calcEMA, calcRSI, calcMACD, calcStochastic,
   calcATR, calcBollingerBands, calcOBV, calcCMF,
   volumeSignal, findSupportResistance,
   estimateTargetDays, calcBrahmaScore, scoreToSignal,
-} = require('../shared/indicators');
+} = require('./shared/indicators');
 
 // ── REAL BACKTEST ENGINE ──────────────────────────────────────────────────────
 

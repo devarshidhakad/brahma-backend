@@ -20,7 +20,6 @@ function getClient() {
   }
 
   client = new Redis(redisUrl, {
-    tls: { rejectUnauthorized: false }, // ElastiCache in-transit encryption
     maxRetriesPerRequest: 1,
     enableReadyCheck: false,
     lazyConnect: false,
